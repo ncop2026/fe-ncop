@@ -12,6 +12,14 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // ── Deployment target: Vercel ──────────────────────────────────────────────
+  // Changed from default Cloudflare preset to Vercel.
+  // Nitro will output to .vercel/output which Vercel picks up automatically.
+  // To revert to Cloudflare: remove the `nitro` key below (Cloudflare is the
+  // default when no preset is specified in this config).
+  nitro: {
+    preset: "vercel",
+  },
   vite: {
     server: {
       port: 3000,

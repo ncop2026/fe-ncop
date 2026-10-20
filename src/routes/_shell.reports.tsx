@@ -15,9 +15,16 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Download, FileSpreadsheet } from "lucide-react";
+import {
+  CircleDollarSign,
+  ClipboardList,
+  Download,
+  FileSpreadsheet,
+  Globe2,
+  PackageCheck,
+} from "lucide-react";
 import { toast } from "sonner";
-import { PageHeader, Panel, Reveal } from "@/components/kit";
+import { MetricCard, MetricGrid, PageHeader, Panel, Reveal } from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -27,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  clients,
+  mockClients as clients,
   countryDistribution,
   inquiryStatusData,
   monthlySales,
@@ -37,13 +44,13 @@ import {
 export const Route = createFileRoute("/_shell/reports")({
   head: () => ({
     meta: [
-      { title: "Reports & Analytics · NCOP ERP" },
+      { title: "Reports & Analytics · Nourish Pharmaceutical ERP" },
       {
         name: "description",
         content:
           "Revenue, sales, top clients, country distribution, inquiry status and product performance analytics.",
       },
-      { property: "og:title", content: "Reports & Analytics · NCOP ERP" },
+      { property: "og:title", content: "Reports & Analytics · Nourish Pharmaceutical ERP" },
       {
         property: "og:description",
         content: "Pharmaceutical sales analytics across markets, clients and product lines.",
@@ -64,6 +71,11 @@ const tip = {
 };
 
 function Reports() {
+  const totalRevenueMillions =
+    monthlySales.reduce((total, month) => total + month.revenue, 0) / 1_000;
+  const totalSalesMillions = monthlySales.reduce((total, month) => total + month.sales, 0) / 1_000;
+  const totalInquiries = inquiryStatusData.reduce((total, status) => total + status.count, 0);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -92,6 +104,42 @@ function Reports() {
         }
       />
 
+      <MetricGrid columns={4} label="Report summary">
+        <MetricCard
+          icon={CircleDollarSign}
+          label="Revenue YTD"
+          value={totalRevenueMillions}
+          decimals={2}
+          prefix="$"
+          suffix="M"
+          detail="Recognised commercial revenue"
+          tone="primary"
+        />
+        <MetricCard
+          icon={PackageCheck}
+          label="Sales volume"
+          value={totalSalesMillions}
+          decimals={2}
+          suffix="M"
+          detail="Units shipped this year"
+          tone="success"
+        />
+        <MetricCard
+          icon={Globe2}
+          label="Active markets"
+          value={countryDistribution.length}
+          detail="Countries with shipped volume"
+          tone="info"
+        />
+        <MetricCard
+          icon={ClipboardList}
+          label="RFQ pipeline"
+          value={totalInquiries}
+          detail="Inquiries across all statuses"
+          tone="violet"
+        />
+      </MetricGrid>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Reveal>
           <Panel>
@@ -101,10 +149,26 @@ function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={monthlySales} margin={{ left: -18, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-                  <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                  <XAxis
+                    dataKey="month"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  />
                   <Tooltip {...tip} />
-                  <Line type="monotone" dataKey="revenue" stroke="var(--chart-1)" strokeWidth={2.6} dot={false} animationDuration={1400} />
+                  <Line
+                    type="monotone"
+                    dataKey="revenue"
+                    stroke="var(--chart-1)"
+                    strokeWidth={2.6}
+                    dot={false}
+                    animationDuration={1400}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -119,10 +183,24 @@ function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlySales} margin={{ left: -18, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-                  <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                  <XAxis
+                    dataKey="month"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  />
                   <Tooltip {...tip} />
-                  <Bar dataKey="sales" radius={[6, 6, 0, 0]} fill="var(--chart-2)" animationDuration={1200} />
+                  <Bar
+                    dataKey="sales"
+                    radius={[6, 6, 0, 0]}
+                    fill="var(--chart-2)"
+                    animationDuration={1200}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -137,14 +215,34 @@ function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   layout="vertical"
-                  data={clients.map((c) => ({ name: c.name, value: +(c.revenue / 1_000_000).toFixed(2) }))}
+                  data={clients.map((c) => ({
+                    name: c.name,
+                    value: +(c.revenue / 1_000_000).toFixed(2),
+                  }))}
                   margin={{ left: 40, right: 16 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                  <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-                  <YAxis type="category" dataKey="name" width={110} tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} />
+                  <XAxis
+                    type="number"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={110}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                  />
                   <Tooltip {...tip} />
-                  <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="var(--chart-1)" animationDuration={1200} />
+                  <Bar
+                    dataKey="value"
+                    radius={[0, 6, 6, 0]}
+                    fill="var(--chart-1)"
+                    animationDuration={1200}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -158,7 +256,15 @@ function Reports() {
             <div className="mt-4 h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={countryDistribution} dataKey="value" nameKey="country" outerRadius={92} stroke="none" animationDuration={1100} label={{ fontSize: 10 }}>
+                  <Pie
+                    data={countryDistribution}
+                    dataKey="value"
+                    nameKey="country"
+                    outerRadius={92}
+                    stroke="none"
+                    animationDuration={1100}
+                    label={{ fontSize: 10 }}
+                  >
                     {countryDistribution.map((_, i) => (
                       <Cell key={i} fill={`var(--chart-${(i % 5) + 1})`} />
                     ))}
@@ -176,7 +282,13 @@ function Reports() {
             <p className="text-xs text-muted-foreground">Open pipeline breakdown</p>
             <div className="mt-4 h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <RadialBarChart data={inquiryStatusData} innerRadius="25%" outerRadius="100%" startAngle={90} endAngle={-270}>
+                <RadialBarChart
+                  data={inquiryStatusData}
+                  innerRadius="25%"
+                  outerRadius="100%"
+                  startAngle={90}
+                  endAngle={-270}
+                >
                   <RadialBar dataKey="count" cornerRadius={8} background animationDuration={1300}>
                     {inquiryStatusData.map((_, i) => (
                       <Cell key={i} fill={`var(--chart-${(i % 5) + 1})`} />
@@ -188,8 +300,14 @@ function Reports() {
             </div>
             <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
               {inquiryStatusData.map((s, i) => (
-                <li key={s.status} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="size-2 rounded-full" style={{ background: `var(--chart-${(i % 5) + 1})` }} />
+                <li
+                  key={s.status}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                >
+                  <span
+                    className="size-2 rounded-full"
+                    style={{ background: `var(--chart-${(i % 5) + 1})` }}
+                  />
                   {s.status} · {s.count}
                 </li>
               ))}
@@ -205,11 +323,30 @@ function Reports() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={productPerformance} margin={{ left: -18, right: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} />
-                  <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+                  <XAxis
+                    dataKey="name"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  />
                   <Tooltip {...tip} />
-                  <Bar dataKey="units" radius={[6, 6, 0, 0]} fill="var(--chart-3)" animationDuration={1200} />
-                  <Bar dataKey="margin" radius={[6, 6, 0, 0]} fill="var(--chart-2)" animationDuration={1400} />
+                  <Bar
+                    dataKey="units"
+                    radius={[6, 6, 0, 0]}
+                    fill="var(--chart-3)"
+                    animationDuration={1200}
+                  />
+                  <Bar
+                    dataKey="margin"
+                    radius={[6, 6, 0, 0]}
+                    fill="var(--chart-2)"
+                    animationDuration={1400}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>

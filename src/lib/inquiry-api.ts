@@ -1,0 +1,92 @@
+import { apiUrl } from "./api-config";
+import { userSessionService } from "./user-session";
+import type { CustomerInquiry, CustomerInquiryRequestDto } from "./inquiry-types";
+import type { PageResponse } from "./auth-types";
+
+function headers(): HeadersInit {
+  const token = userSessionService.getCurrentUser()?.token;
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+async function response<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    if (res.status === 401) await userSessionService.handleUnauthorizedResponse();
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message || `API error ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function createInquiry(dto: CustomerInquiryRequestDto): Promise<CustomerInquiry> {
+  return response<CustomerInquiry>(
+    await fetch(apiUrl("/api/v1/inquiries"), {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(dto),
+    }),
+  );
+}
+
+/** Save incomplete Sales work without routing it to QA or QC. */
+export async function createInquiryDraft(dto: CustomerInquiryRequestDto): Promise<CustomerInquiry> {
+  return response<CustomerInquiry>(
+    await fetch(apiUrl("/api/v1/inquiries/draft"), {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(dto),
+    }),
+  );
+}
+
+export async function updateInquiry(
+  id: string,
+  dto: CustomerInquiryRequestDto,
+): Promise<CustomerInquiry> {
+  return response<CustomerInquiry>(
+    await fetch(apiUrl(`/api/v1/inquiries/${id}`), {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(dto),
+    }),
+  );
+}
+
+/** Update a Sales draft while keeping it private from the review queues. */
+export async function updateInquiryDraft(
+  id: string,
+  dto: CustomerInquiryRequestDto,
+): Promise<CustomerInquiry> {
+  return response<CustomerInquiry>(
+    await fetch(apiUrl(`/api/v1/inquiries/${id}/draft`), {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(dto),
+    }),
+  );
+}
+
+export async function fetchInquiries(page = 0, size = 20): Promise<PageResponse<CustomerInquiry>> {
+  return response<PageResponse<CustomerInquiry>>(
+    await fetch(apiUrl(`/api/v1/inquiries?page=${page}&size=${size}`), {
+      headers: headers(),
+    }),
+  );
+}
+
+export async function fetchMyInquiries(
+  page = 0,
+  size = 20,
+): Promise<PageResponse<CustomerInquiry>> {
+  return response<PageResponse<CustomerInquiry>>(
+    await fetch(apiUrl(`/api/v1/inquiries/my?page=${page}&size=${size}`), { headers: headers() }),
+  );
+}
+
+export async function fetchInquiryById(id: string): Promise<CustomerInquiry> {
+  return response<CustomerInquiry>(
+    await fetch(apiUrl(`/api/v1/inquiries/${id}`), { headers: headers() }),
+  );
+}

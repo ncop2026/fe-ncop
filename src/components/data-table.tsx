@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ArrowUpDown, ChevronLeft, ChevronRight, MoreHorizontal, Search } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { PaginationBar } from "@/components/ui/pagination-bar";
+import { smoothEase } from "@/lib/animations";
 
 export type Column<T> = {
   key: string;
@@ -41,10 +43,11 @@ export function DataTable<T extends { id: string }>({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [page, setPage] = useState(1);
+  const [currentPageSize, setCurrentPageSize] = useState(pageSize || 10);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let out = q ? rows.filter((r) => searchKeys(r).toLowerCase().includes(q)) : [...rows];
+    const out = q ? rows.filter((r) => searchKeys(r).toLowerCase().includes(q)) : [...rows];
     if (sort) {
       const col = columns.find((c) => c.key === sort.key);
       if (col?.sortValue) {
@@ -61,9 +64,9 @@ export function DataTable<T extends { id: string }>({
     return out;
   }, [rows, query, sort, columns, searchKeys]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pages = Math.max(1, Math.ceil(filtered.length / currentPageSize));
   const current = Math.min(page, pages);
-  const visible = filtered.slice((current - 1) * pageSize, current * pageSize);
+  const visible = filtered.slice((current - 1) * currentPageSize, current * currentPageSize);
 
   return (
     <div className="surface overflow-hidden">
@@ -86,7 +89,7 @@ export function DataTable<T extends { id: string }>({
       {visible.length === 0 ? (
         <div className="p-6">{empty}</div>
       ) : (
-        <div className="max-h-[560px] overflow-auto">
+        <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10">
               <tr className="bg-secondary/80 backdrop-blur-md">
@@ -124,13 +127,13 @@ export function DataTable<T extends { id: string }>({
               {visible.map((row, i) => (
                 <motion.tr
                   key={row.id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.035, duration: 0.3 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: i * 0.025, duration: 0.28, ease: smoothEase }}
                   onClick={() => onRowClick?.(row)}
                   className={cn(
-                    "border-b border-border/70 transition-colors last:border-0",
-                    onRowClick && "cursor-pointer hover:bg-secondary/60",
+                    "border-b border-border/70 transition-colors duration-150 last:border-0",
+                    onRowClick && "cursor-pointer hover:bg-secondary/70 active:bg-secondary/90",
                   )}
                 >
                   {columns.map((col) => (
@@ -173,42 +176,17 @@ export function DataTable<T extends { id: string }>({
         </div>
       )}
 
-      <div className="flex flex-col gap-3 border-t border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">
-          Showing {visible.length} of {filtered.length} records
-        </p>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-8"
-            aria-label="Previous page"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          {Array.from({ length: pages }).map((_, i) => (
-            <Button
-              key={i}
-              variant={current === i + 1 ? "default" : "outline"}
-              size="icon"
-              className="size-8 text-xs"
-              onClick={() => setPage(i + 1)}
-            >
-              {i + 1}
-            </Button>
-          ))}
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-8"
-            aria-label="Next page"
-            onClick={() => setPage((p) => Math.min(pages, p + 1))}
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        page={current - 1}
+        pageSize={currentPageSize}
+        totalElements={filtered.length}
+        totalPages={pages}
+        onPageChange={(p) => setPage(p + 1)}
+        onPageSizeChange={(newSize) => {
+          setCurrentPageSize(newSize);
+          setPage(1);
+        }}
+      />
     </div>
   );
 }

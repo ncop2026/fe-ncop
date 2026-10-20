@@ -4,9 +4,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(300%);
+  }
+}
+
 @theme {
-  --font-sans:
-    "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --color-brand-50: oklch(0.968 0.017 254);
   --color-brand-100: oklch(0.93 0.037 254);
@@ -19,8 +24,7 @@
   --shadow-soft: 0 1px 2px oklch(0.26 0.09 262 / 0.06), 0 8px 24px oklch(0.26 0.09 262 / 0.07);
   --shadow-lift:
     0 2px 4px oklch(0.26 0.09 262 / 0.06), 0 18px 40px -12px oklch(0.26 0.09 262 / 0.22);
-  --shadow-glass:
-    inset 0 1px 0 oklch(1 0 0 / 0.18), 0 12px 40px -8px oklch(0.2 0.06 262 / 0.35);
+  --shadow-glass: inset 0 1px 0 oklch(1 0 0 / 0.18), 0 12px 40px -8px oklch(0.2 0.06 262 / 0.35);
 }
 
 @utility glass {
@@ -28,6 +32,11 @@
   backdrop-filter: blur(16px) saturate(150%);
   border: 1px solid color-mix(in oklab, white 55%, transparent);
   box-shadow: var(--shadow-glass);
+  transition:
+    backdrop-filter 0.3s ease,
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 @utility glass-dark {
@@ -35,16 +44,37 @@
   backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid oklch(1 0 0 / 0.14);
   box-shadow: var(--shadow-glass);
+  transition:
+    backdrop-filter 0.3s ease,
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 @utility lift {
   transition:
-    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.28s ease,
-    border-color 0.28s ease;
-  &:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-lift);
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.25s ease;
+  will-change: transform, box-shadow;
+  @media (hover: hover) {
+    &:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-lift);
+    }
+  }
+  &:active {
+    transform: translateY(-1px);
+    transition-duration: 0.1s;
+  }
+}
+
+@utility pressable {
+  transition:
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.18s ease;
+  &:active {
+    transform: scale(0.975);
   }
 }
 
@@ -53,6 +83,10 @@
   border: 1px solid var(--border);
   border-radius: 16px;
   box-shadow: var(--shadow-soft);
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
 }
 
 @utility text-gradient {
@@ -143,8 +177,8 @@
   --destructive-foreground: oklch(0.99 0.005 250);
   --border: oklch(0.905 0.012 253);
   --input: oklch(0.9 0.012 253);
-  --ring: oklch(0.55 0.16 258);
-  --chart-1: oklch(0.47 0.17 259);
+  --ring: oklch(0.42 0.16 259);
+  --chart-1: oklch(0.42 0.16 259);
   --chart-2: oklch(0.63 0.14 163);
   --chart-3: oklch(0.68 0.12 235);
   --chart-4: oklch(0.75 0.13 85);
@@ -156,7 +190,7 @@
   --sidebar-accent: oklch(0.955 0.012 250);
   --sidebar-accent-foreground: oklch(0.3 0.05 260);
   --sidebar-border: oklch(0.91 0.012 253);
-  --sidebar-ring: oklch(0.55 0.16 258);
+  --sidebar-ring: oklch(0.42 0.16 259);
 }
 
 .dark {
@@ -166,32 +200,32 @@
   --card-foreground: oklch(0.97 0.006 250);
   --popover: oklch(0.215 0.026 264);
   --popover-foreground: oklch(0.97 0.006 250);
-  --primary: oklch(0.65 0.15 256);
-  --primary-foreground: oklch(0.17 0.03 264);
+  --primary: oklch(0.42 0.16 259);
+  --primary-foreground: oklch(0.99 0.005 250);
   --secondary: oklch(0.27 0.03 264);
   --secondary-foreground: oklch(0.95 0.006 250);
   --muted: oklch(0.26 0.028 264);
   --muted-foreground: oklch(0.7 0.028 258);
-  --accent: oklch(0.68 0.14 163);
-  --accent-foreground: oklch(0.17 0.03 264);
+  --accent: oklch(0.78 0.18 160);
+  --accent-foreground: oklch(0.12 0.03 264);
   --destructive: oklch(0.66 0.19 22);
   --destructive-foreground: oklch(0.98 0.005 250);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.62 0.13 256);
-  --chart-1: oklch(0.65 0.15 256);
-  --chart-2: oklch(0.7 0.14 163);
+  --ring: oklch(0.42 0.16 259);
+  --chart-1: oklch(0.42 0.16 259);
+  --chart-2: oklch(0.78 0.18 160);
   --chart-3: oklch(0.72 0.12 235);
   --chart-4: oklch(0.78 0.13 85);
   --chart-5: oklch(0.68 0.16 300);
   --sidebar: oklch(0.19 0.024 264);
   --sidebar-foreground: oklch(0.95 0.006 250);
-  --sidebar-primary: oklch(0.65 0.15 256);
-  --sidebar-primary-foreground: oklch(0.17 0.03 264);
+  --sidebar-primary: oklch(0.42 0.16 259);
+  --sidebar-primary-foreground: oklch(0.99 0.005 250);
   --sidebar-accent: oklch(0.27 0.03 264);
   --sidebar-accent-foreground: oklch(0.95 0.006 250);
   --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.62 0.13 256);
+  --sidebar-ring: oklch(0.42 0.16 259);
 }
 
 @layer base {
@@ -199,21 +233,238 @@
     border-color: var(--color-border);
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Make every interactive control clearly afford clicking, regardless of its component source. */
+  a[href],
+  button:not(:disabled),
+  summary,
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="file"]:not(:disabled),
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  input:disabled,
+  select:disabled,
+  textarea:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* Shared application primitives: native markup inherits the same treatment as UI components. */
+  button,
+  input,
+  textarea,
+  select,
+  [role="combobox"] {
+    transition:
+      color 0.2s ease,
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      transform 0.2s ease;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [role="menuitem"]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  table thead {
+    background-color: color-mix(in oklab, var(--muted) 72%, transparent);
+  }
+
+  table th {
+    color: var(--muted-foreground);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  table th,
+  table td {
+    border-color: color-mix(in oklab, var(--border) 72%, transparent);
+  }
+
+  table tbody tr {
+    transition: background-color 0.18s ease;
+  }
+
+  @media (hover: hover) {
+    table tbody tr:hover {
+      background-color: color-mix(in oklab, var(--secondary) 68%, transparent);
+    }
+  }
+
+  /* Custom Scrollbar for Root & Explicitly Scrollable Containers */
+  html,
+  body,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-auto,
+  .custom-scrollbar,
+  [data-radix-scroll-area-viewport] {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 26%, transparent) transparent;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar,
+  .overflow-y-auto::-webkit-scrollbar,
+  .overflow-x-auto::-webkit-scrollbar,
+  .overflow-auto::-webkit-scrollbar,
+  .custom-scrollbar::-webkit-scrollbar,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  html::-webkit-scrollbar-track,
+  body::-webkit-scrollbar-track,
+  .overflow-y-auto::-webkit-scrollbar-track,
+  .overflow-x-auto::-webkit-scrollbar-track,
+  .overflow-auto::-webkit-scrollbar-track,
+  .custom-scrollbar::-webkit-scrollbar-track,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  html::-webkit-scrollbar-thumb,
+  body::-webkit-scrollbar-thumb,
+  .overflow-y-auto::-webkit-scrollbar-thumb,
+  .overflow-x-auto::-webkit-scrollbar-thumb,
+  .overflow-auto::-webkit-scrollbar-thumb,
+  .custom-scrollbar::-webkit-scrollbar-thumb,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 24%, transparent);
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+  }
+
+  html::-webkit-scrollbar-thumb:hover,
+  body::-webkit-scrollbar-thumb:hover,
+  .overflow-y-auto::-webkit-scrollbar-thumb:hover,
+  .overflow-x-auto::-webkit-scrollbar-thumb:hover,
+  .overflow-auto::-webkit-scrollbar-thumb:hover,
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 48%, transparent);
+    background-clip: padding-box;
+  }
+
+  html::-webkit-scrollbar-thumb:active,
+  body::-webkit-scrollbar-thumb:active,
+  .overflow-y-auto::-webkit-scrollbar-thumb:active,
+  .overflow-x-auto::-webkit-scrollbar-thumb:active,
+  .overflow-auto::-webkit-scrollbar-thumb:active,
+  .custom-scrollbar::-webkit-scrollbar-thumb:active,
+  [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb:active {
+    background: color-mix(in oklab, var(--primary) 75%, transparent);
+    background-clip: padding-box;
+  }
+
+  html::-webkit-scrollbar-corner,
+  body::-webkit-scrollbar-corner,
+  .overflow-y-auto::-webkit-scrollbar-corner,
+  .overflow-x-auto::-webkit-scrollbar-corner,
+  .overflow-auto::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Explicitly suppress any accidental scrollbars inside cards and articles */
+  article,
+  .card,
+  [data-card],
+  .panel {
+    scrollbar-width: none !important;
+  }
+
+  article::-webkit-scrollbar,
+  .card::-webkit-scrollbar,
+  [data-card]::-webkit-scrollbar,
+  .panel::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    transition:
+      background-color 0.35s ease,
+      color 0.35s ease;
+  }
+
+  button,
+  input,
+  optgroup,
+  select,
+  textarea,
+  table,
+  th,
+  td {
+    font-family: var(--font-sans);
   }
 
   h1,
   h2,
-  h3 {
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-sans);
     letter-spacing: -0.02em;
   }
 }
 
 @layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 22%, transparent);
+    border-radius: 9999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--primary) 50%, transparent);
+  }
+
+  .scrollbar-none,
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar,
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -231,6 +482,21 @@
   .kenburns {
     animation: kenburns 18s ease-out both;
   }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--primary) 8%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite ease-in-out;
+  }
+
+  .animate-pulse-subtle {
+    animation: pulse-subtle 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
 }
 
 @keyframes kenburns {
@@ -239,5 +505,45 @@
   }
   to {
     transform: scale(1.16) translate3d(-1.5%, -1%, 0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  button,
+  [role="button"],
+  a {
+    -webkit-tap-highlight-color: transparent;
   }
 }

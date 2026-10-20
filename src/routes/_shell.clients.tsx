@@ -1,337 +1,2447 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useForm, useFieldArray } from "react-hook-form";
 import { motion } from "motion/react";
 import {
   Building2,
+  ChevronLeft,
+  CheckCircle2,
   Download,
+  ExternalLink,
+  Eye,
   FileText,
   Globe2,
+  Loader2,
   Mail,
   MapPin,
   Phone,
   Plus,
   Search,
+  Send,
+  Trash2,
+  Upload,
   Users,
+  User,
+  RotateCcw,
+  Pencil,
+  Crown,
+  Award,
+  Medal,
+  Shield,
+  Star,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PageHeader, Panel, Reveal, StatusChip, Timeline, EmptyState } from "@/components/kit";
+
+import {
+  ClientCardGridLoader,
+  ClientTableLoader,
+  EmptyState,
+  MetricCard,
+  MetricGrid,
+  PageHeader,
+  Panel,
+  Reveal,
+  StatusChip,
+  TableRowLoader,
+  UniversalFilterBar,
+} from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
-import { clients, type Client } from "@/lib/mock-data";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { normalizeCountryName } from "@/lib/country";
+import { DocumentViewerDialog } from "@/components/document-viewer-dialog";
+import { PaginationBar } from "@/components/ui/pagination-bar";
+import { ViewModeToggle, type ViewMode } from "@/components/view-mode-toggle";
+
+import {
+  fetchClients,
+  fetchAllClients,
+  createClient,
+  updateClient,
+  deleteClient,
+  resendRegistrationEmail,
+  uploadDocument,
+  deleteDocument,
+  getDocumentDownloadUrl,
+} from "@/lib/client-api";
+import type {
+  Client,
+  ClientRequestDto,
+  Address,
+  CustomerType,
+  ClientLevel,
+  DocumentType,
+  ClientDocument,
+} from "@/lib/client-types";
+import {
+  CUSTOMER_TYPES,
+  CLIENT_LEVELS,
+  CUSTOMER_TYPE_LABELS,
+  CLIENT_LEVEL_LABELS,
+  ADDRESS_TYPE_LABELS,
+  DOCUMENT_TYPE_LABELS,
+  DOCUMENT_TYPES,
+} from "@/lib/client-types";
+
+// ─── Route ───────────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute("/_shell/clients")({
   head: () => ({
     meta: [
-      { title: "Client Master · NCOP ERP" },
+      { title: "Clients · Nourish Pharmaceutical ERP" },
       {
         name: "description",
         content:
           "Company records, contacts, payment terms, banking details and document dossiers for every pharmaceutical partner.",
-      },
-      { property: "og:title", content: "Client Master · NCOP ERP" },
-      {
-        property: "og:description",
-        content: "Complete pharmaceutical client dossiers with documents and activity timelines.",
       },
     ],
   }),
   component: ClientMaster,
 });
 
-const segments = ["All", "Manufacturer", "Distributor", "Wholesaler", "Government Tender"] as const;
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const filterSegments = ["All", ...CUSTOMER_TYPES] as const;
+const filterLevels = ["All", ...CLIENT_LEVELS] as const;
+
+const TIER_CONFIG: Record<ClientLevel, { icon: typeof Crown; color: string }> = {
+  PLATINUM: { icon: Crown, color: "bg-violet-500/12 text-violet-600 border-violet-500/25" },
+  GOLD: { icon: Award, color: "bg-amber-500/12 text-amber-600 border-amber-500/25" },
+  SILVER: { icon: Medal, color: "bg-slate-400/12 text-slate-500 border-slate-400/25" },
+  BRONZE: { icon: Shield, color: "bg-orange-500/12 text-orange-600 border-orange-500/25" },
+  NO_VIP: { icon: Star, color: "bg-muted text-muted-foreground border-border" },
+};
+
+// ─── Address field type ──────────────────────────────────────────────────────
+
+interface AddressFields {
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  country: string;
+  pinCode: string;
+}
+
+const emptyAddress: AddressFields = {
+  line1: "",
+  line2: "",
+  city: "",
+  state: "",
+  country: "",
+  pinCode: "",
+};
+
+// ─── Form types ──────────────────────────────────────────────────────────────
+
+export interface ClientFormValues {
+  // customerCode is auto-generated by the backend
+  customerType: CustomerType;
+  companyName: string;
+  tradeName: string;
+  annualTurnover: string;
+  paymentTerms: {
+    advancePercent: string;
+    beforeDispatchPercent: string;
+    afterDispatchDays: string;
+    afterDispatchPercent: string;
+  };
+  // Fixed address blocks
+  registeredAddress: AddressFields;
+  billingAddress: AddressFields;
+  shippingAddress: AddressFields;
+  billingSameAsRegistered: boolean;
+  shippingSameAsBilling: boolean;
+  // Dynamic POC list
+  pointOfContacts: {
+    personName: string;
+    designation: string;
+    department: string;
+    phone: string;
+    email: string;
+    primary: boolean;
+  }[];
+}
+
+export interface PendingClientDocument {
+  documentType: DocumentType;
+  file: File;
+}
+
+const defaultFormValues: ClientFormValues = {
+  customerType: "DOMESTIC",
+  companyName: "",
+  tradeName: "",
+  annualTurnover: "",
+  paymentTerms: {
+    advancePercent: "",
+    beforeDispatchPercent: "",
+    afterDispatchDays: "",
+    afterDispatchPercent: "",
+  },
+  registeredAddress: { ...emptyAddress },
+  billingAddress: { ...emptyAddress },
+  shippingAddress: { ...emptyAddress },
+  billingSameAsRegistered: false,
+  shippingSameAsBilling: false,
+  pointOfContacts: [],
+};
+
+function buildAddressArray(values: ClientFormValues): Address[] {
+  const addresses: Address[] = [];
+
+  const reg = values.registeredAddress;
+  if (reg.line1) {
+    addresses.push({ type: "REGISTERED", ...reg, country: normalizeCountryName(reg.country) });
+  }
+
+  if (values.billingSameAsRegistered && reg.line1) {
+    addresses.push({ type: "BILLING", ...reg, country: normalizeCountryName(reg.country) });
+  } else if (values.billingAddress.line1) {
+    addresses.push({
+      type: "BILLING",
+      ...values.billingAddress,
+      country: normalizeCountryName(values.billingAddress.country),
+    });
+  }
+
+  const billingSource = values.billingSameAsRegistered ? reg : values.billingAddress;
+  if (values.shippingSameAsBilling && billingSource.line1) {
+    addresses.push({ type: "SHIPPING", ...billingSource, country: normalizeCountryName(billingSource.country) });
+  } else if (values.shippingAddress.line1) {
+    addresses.push({
+      type: "SHIPPING",
+      ...values.shippingAddress,
+      country: normalizeCountryName(values.shippingAddress.country),
+    });
+  }
+
+  return addresses;
+}
+
+export function formToDto(values: ClientFormValues): ClientRequestDto {
+  const addresses = buildAddressArray(values);
+  const paymentTerms = {
+    advancePercent: values.paymentTerms.advancePercent
+      ? Number(values.paymentTerms.advancePercent)
+      : undefined,
+    beforeDispatchPercent: values.paymentTerms.beforeDispatchPercent
+      ? Number(values.paymentTerms.beforeDispatchPercent)
+      : undefined,
+    afterDispatchDays: values.paymentTerms.afterDispatchDays
+      ? Number(values.paymentTerms.afterDispatchDays)
+      : undefined,
+    afterDispatchPercent: values.paymentTerms.afterDispatchPercent
+      ? Number(values.paymentTerms.afterDispatchPercent)
+      : undefined,
+  };
+  const hasPaymentTerms = Object.values(paymentTerms).some((value) => value !== undefined);
+
+  return {
+    customerCode: "", // auto-generated by backend, ignored
+    customerType: values.customerType,
+    companyName: values.companyName,
+    tradeName: values.tradeName || undefined,
+    annualTurnover: values.annualTurnover ? Number(values.annualTurnover) : undefined,
+    paymentTerms: hasPaymentTerms ? paymentTerms : undefined,
+    addresses: addresses.length > 0 ? addresses : undefined,
+    pointOfContacts: values.pointOfContacts.length > 0 ? values.pointOfContacts : undefined,
+  };
+}
+
+function areAddressesEqual(a?: AddressFields, b?: AddressFields): boolean {
+  if (!a || !b) return false;
+  if (!a.line1?.trim() && !a.city?.trim()) return false;
+  return (
+    (a.line1 ?? "").trim().toLowerCase() === (b.line1 ?? "").trim().toLowerCase() &&
+    (a.line2 ?? "").trim().toLowerCase() === (b.line2 ?? "").trim().toLowerCase() &&
+    (a.city ?? "").trim().toLowerCase() === (b.city ?? "").trim().toLowerCase() &&
+    (a.state ?? "").trim().toLowerCase() === (b.state ?? "").trim().toLowerCase() &&
+    (a.country ?? "").trim().toLowerCase() === (b.country ?? "").trim().toLowerCase() &&
+    (a.pinCode ?? "").trim().toLowerCase() === (b.pinCode ?? "").trim().toLowerCase()
+  );
+}
+
+function clientToFormValues(client: Client): ClientFormValues {
+  const registeredAddr = client.addresses?.find((a) => a.type === "REGISTERED");
+  const billingAddr = client.addresses?.find((a) => a.type === "BILLING");
+  const shippingAddr = client.addresses?.find((a) => a.type === "SHIPPING");
+
+  const toFields = (a?: Address): AddressFields => ({
+    line1: a?.line1 ?? "",
+    line2: a?.line2 ?? "",
+    city: a?.city ?? "",
+    state: a?.state ?? "",
+    country: normalizeCountryName(a?.country),
+    pinCode: a?.pinCode ?? "",
+  });
+
+  const regFields = toFields(registeredAddr);
+  const billFields = toFields(billingAddr);
+  const shipFields = toFields(shippingAddr);
+
+  // Detect if billing was same as registered
+  const billingSameAsRegistered =
+    !!registeredAddr && !!billingAddr && areAddressesEqual(regFields, billFields);
+
+  const billingSource = billingSameAsRegistered ? regFields : billFields;
+
+  // Detect if shipping was same as billing
+  const shippingSameAsBilling =
+    (!!billingAddr || billingSameAsRegistered) &&
+    !!shippingAddr &&
+    areAddressesEqual(billingSource, shipFields);
+
+  return {
+    customerType: client.customerType,
+    companyName: client.companyName,
+    tradeName: client.tradeName ?? "",
+    annualTurnover: client.annualTurnover?.toString() ?? "",
+    paymentTerms: {
+      advancePercent: client.paymentTerms?.advancePercent?.toString() ?? "",
+      beforeDispatchPercent: client.paymentTerms?.beforeDispatchPercent?.toString() ?? "",
+      afterDispatchDays: client.paymentTerms?.afterDispatchDays?.toString() ?? "",
+      afterDispatchPercent: client.paymentTerms?.afterDispatchPercent?.toString() ?? "",
+    },
+    registeredAddress: regFields,
+    billingAddress: billingSameAsRegistered ? { ...regFields } : billFields,
+    shippingAddress: shippingSameAsBilling ? { ...billingSource } : shipFields,
+    billingSameAsRegistered,
+    shippingSameAsBilling,
+    pointOfContacts: (client.pointOfContacts ?? []).map((p) => ({
+      personName: p.personName,
+      designation: p.designation,
+      department: p.department,
+      phone: p.phone,
+      email: p.email,
+      primary: p.primary ?? false,
+    })),
+  };
+}
+
+// ─── Tier Badge ──────────────────────────────────────────────────────────────
+
+function TierBadge({ level }: { level: ClientLevel }) {
+  const cfg = TIER_CONFIG[level];
+  const Icon = cfg.icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+        cfg.color,
+      )}
+    >
+      <Icon className="size-3" />
+      {CLIENT_LEVEL_LABELS[level]}
+    </span>
+  );
+}
+
+// ─── Currency Formatter ──────────────────────────────────────────────────────
+
+function formatINR(value: number): string {
+  if (value >= 10_000_000) return `₹${(value / 10_000_000).toFixed(2)} Cr`;
+  if (value >= 100_000) return `₹${(value / 100_000).toFixed(2)} L`;
+  return `₹${value.toLocaleString("en-IN")}`;
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 function ClientMaster() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [segment, setSegment] = useState<(typeof segments)[number]>("All");
-  const [active, setActive] = useState<Client | null>(null);
+  const [segment, setSegment] = useState<(typeof filterSegments)[number]>("All");
+  const [clientLevel, setClientLevel] = useState<(typeof filterLevels)[number]>("All");
+  const [country, setCountry] = useState("All");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<Client | null>(null);
+
+  const {
+    data: pageData,
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: ["clients", page, pageSize, query],
+    queryFn: () => fetchClients({ page, size: pageSize, search: query.trim() || undefined }),
+    refetchInterval: 3000,
+  });
+  const { data: allClients = [], isLoading: allClientsLoading } = useQuery({
+    queryKey: ["clients", "all"],
+    queryFn: fetchAllClients,
+  });
+
+  const clients = pageData?.content ?? [];
+  const totalElements = pageData?.totalElements ?? 0;
+  const totalPages = pageData?.totalPages ?? 1;
+
+  const active = clients.find((c) => c.id === activeId) ?? null;
+
+  const createMutation = useMutation({
+    mutationFn: async ({
+      dto,
+      pendingDocuments,
+    }: {
+      dto: ClientRequestDto;
+      pendingDocuments: PendingClientDocument[];
+    }) => {
+      const newClient = await createClient(dto);
+      let updatedClient = newClient;
+      let failedUploads = 0;
+      for (const { documentType, file } of pendingDocuments) {
+        try {
+          updatedClient = await uploadDocument(newClient.id, file, documentType);
+        } catch {
+          failedUploads += 1;
+        }
+      }
+      return { newClient: updatedClient, failedUploads };
+    },
+    onSuccess: ({ newClient, failedUploads }) => {
+      queryClient.setQueryData<Client[]>(["clients"], (old = []) => [newClient, ...old]);
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      setFormOpen(false);
+      setActiveId(newClient.id);
+      if (failedUploads > 0) {
+        toast.warning(
+          `Client created, but ${failedUploads} document${failedUploads === 1 ? "" : "s"} could not be uploaded.`,
+        );
+      } else {
+        toast.success("Client created successfully");
+      }
+    },
+    onError: (err: Error) => toast.error(`Failed to create client: ${err.message}`),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: ClientRequestDto }) => updateClient(id, dto),
+    onSuccess: (updatedClient) => {
+      queryClient.setQueryData<Client[]>(["clients"], (old = []) =>
+        old.map((c) => (c.id === updatedClient.id ? updatedClient : c)),
+      );
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      setFormOpen(false);
+      setEditingClient(null);
+      toast.success("Client updated successfully");
+    },
+    onError: (err: Error) => toast.error(`Failed to update client: ${err.message}`),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteClient(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "clients"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "client-count"] });
+      setActiveId(null);
+      setDeleteConfirm(null);
+      toast.success("Client deleted successfully");
+    },
+    onError: (err: Error) => toast.error(`Failed to delete client: ${err.message}`),
+  });
+
+  const emailMutation = useMutation({
+    mutationFn: resendRegistrationEmail,
+    onSuccess: () => toast.success("Registration email sent"),
+    onError: (err: Error) => toast.error(`Failed to send email: ${err.message}`),
+  });
 
   const filtered = clients.filter(
     (c) =>
-      (segment === "All" || c.segment === segment) &&
-      `${c.name} ${c.country} ${c.contactPerson} ${c.code}`
+      (segment === "All" || c.customerType === segment) &&
+      (clientLevel === "All" || c.clientLevel === clientLevel) &&
+      (country === "All" ||
+        c.addresses?.some((address) => normalizeCountryName(address.country) === country)) &&
+      `${c.companyName} ${c.customerCode} ${c.tradeName ?? ""}`
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
 
+  const hasActiveFilters =
+    query.trim().length > 0 || segment !== "All" || clientLevel !== "All" || country !== "All";
+
+  const countries = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          allClients.flatMap((client) =>
+            (client.addresses ?? [])
+              .map((address) => normalizeCountryName(address.country))
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [allClients],
+  );
+
+  function handleResetFilters() {
+    setQuery("");
+    setSegment("All");
+    setClientLevel("All");
+    setCountry("All");
+    setPage(0);
+  }
+
+  const clientMetrics = useMemo(
+    () => ({
+      total: allClients.length,
+      export: allClients.filter((client) =>
+        ["EXPORT", "MERCHANT_EXPORTER"].includes(client.customerType),
+      ).length,
+      domestic: allClients.filter((client) => client.customerType === "DOMESTIC").length,
+      contacts: allClients.reduce(
+        (total, client) => total + (client.pointOfContacts?.length ?? 0),
+        0,
+      ),
+    }),
+    [allClients],
+  );
+
+  const firstPoc = (c: Client) => c.pointOfContacts?.[0];
+  const firstAddr = (c: Client) => c.addresses?.[0];
+
+  function openEdit(client: Client) {
+    setEditingClient(client);
+    setFormOpen(true);
+  }
+
+  function openCreate() {
+    setEditingClient(null);
+    setFormOpen(true);
+  }
+
+  if (formOpen) {
+    return (
+      <ClientFormView
+        editingClient={editingClient}
+        onClose={() => {
+          setFormOpen(false);
+          setEditingClient(null);
+        }}
+        isSubmitting={createMutation.isPending || updateMutation.isPending}
+        onSubmit={(values: ClientFormValues, pendingDocuments) => {
+          const dto = formToDto(values);
+          if (editingClient) {
+            updateMutation.mutate({ id: editingClient.id, dto });
+          } else {
+            createMutation.mutate({ dto, pendingDocuments });
+          }
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>Client Master</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb> */}
-
       <PageHeader
         eyebrow="ERP"
-        title="Client Master"
-        description="148 registered partners across 42 markets. Select a company to open its full dossier."
+        title="Clients"
+        description={
+          isLoading
+            ? "Loading clients…"
+            : `${clients.length} registered partner${clients.length !== 1 ? "s" : ""}. Select a company to open its full dossier.`
+        }
         actions={
-          <>
-            <Button variant="outline" onClick={() => toast("Client list exported as XLSX")}>
-              <Download className="size-4" /> Export
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewModeToggle value={viewMode} onChange={setViewMode} />
+            <Button
+              variant="outline"
+              onClick={() => toast("Client list exported as XLSX")}
+              className="gap-2 font-medium"
+            >
+              <Download className="size-4 text-primary dark:text-accent" /> Export
             </Button>
-            <Button onClick={() => toast.success("New client draft created")}>
+            <Button onClick={openCreate}>
               <Plus className="size-4" /> Add client
             </Button>
-          </>
+          </div>
         }
       />
 
-      <Panel className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="relative w-full lg:max-w-sm">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by company, contact or country…"
-            className="pl-9"
-          />
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {segments.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSegment(s)}
-              className={cn(
-                "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                segment === s
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:bg-secondary",
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </Panel>
+      <MetricGrid columns={4} label="Client summary">
+        <MetricCard
+          icon={Users}
+          label="Total clients"
+          value={clientMetrics.total}
+          detail="Registered client accounts"
+          loading={allClientsLoading}
+          tone="primary"
+        />
+        <MetricCard
+          icon={Globe2}
+          label="Export partners"
+          value={clientMetrics.export}
+          detail="Export and merchant export"
+          loading={allClientsLoading}
+          tone="success"
+        />
+        <MetricCard
+          icon={Building2}
+          label="Domestic clients"
+          value={clientMetrics.domestic}
+          detail="Domestic market partners"
+          loading={allClientsLoading}
+          tone="warning"
+        />
+        <MetricCard
+          icon={Users}
+          label="Points of contact"
+          value={clientMetrics.contacts}
+          detail="Across all client accounts"
+          loading={allClientsLoading}
+          tone="violet"
+        />
+      </MetricGrid>
 
-      {filtered.length === 0 ? (
+      <UniversalFilterBar
+        search={query}
+        onSearchChange={(val) => {
+          setQuery(val);
+          setPage(0);
+        }}
+        searchPlaceholder="Search by company, code or trade name…"
+        hasActiveFilters={hasActiveFilters}
+        onReset={handleResetFilters}
+        filterColumns={3}
+      >
+        <Select value={segment} onValueChange={(value) => setSegment(value as typeof segment)}>
+          <SelectTrigger className="w-full min-w-0">
+            <SelectValue placeholder="All client types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="All">All client types</SelectItem>
+            {CUSTOMER_TYPES.map((type) => (
+              <SelectItem key={type} value={type}>
+                {CUSTOMER_TYPE_LABELS[type]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={clientLevel}
+          onValueChange={(value) => setClientLevel(value as typeof clientLevel)}
+        >
+          <SelectTrigger className="w-full min-w-0">
+            <SelectValue placeholder="All client levels" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="All">All client levels</SelectItem>
+            {CLIENT_LEVELS.map((level) => (
+              <SelectItem key={level} value={level}>
+                {CLIENT_LEVEL_LABELS[level]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={country} onValueChange={setCountry}>
+          <SelectTrigger className="w-full min-w-0">
+            <SelectValue placeholder="All countries" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="All">All countries</SelectItem>
+            {countries.map((item) => (
+              <SelectItem key={item} value={item}>
+                {item}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </UniversalFilterBar>
+
+      {/* ── Error ── */}
+      {isError && (
         <EmptyState
           icon={<Users className="size-5" />}
-          title="No clients match your filters"
-          description="Try a different segment or clear the search term to see all registered partners."
+          title="Failed to load clients"
+          description={error?.message ?? "An unexpected error occurred."}
           action={
-            <Button variant="outline" size="sm" onClick={() => { setQuery(""); setSegment("All"); }}>
-              Reset filters
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["clients"] })}
+            >
+              Retry
             </Button>
           }
         />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((c, i) => (
-            <Reveal key={c.id} delay={i * 0.05}>
-              <button onClick={() => setActive(c)} className="w-full text-left">
-                <Panel hover className="h-full">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
-                        {c.name.slice(0, 2).toUpperCase()}
-                      </span>
-                      <div>
-                        <p className="font-semibold leading-tight">{c.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {c.code} · {c.segment}
-                        </p>
-                      </div>
-                    </div>
-                    <StatusChip status={c.status} />
-                  </div>
-
-                  <dl className="mt-5 space-y-2 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <Globe2 className="size-3.5" /> {c.city}, {c.country}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Mail className="size-3.5" /> {c.email}
-                    </div>
-                  </dl>
-
-                  <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        Revenue YTD
-                      </p>
-                      <p className="text-sm font-semibold tabular-nums">
-                        ${(c.revenue / 1_000_000).toFixed(2)}M
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        Open orders
-                      </p>
-                      <p className="text-sm font-semibold">{c.openOrders}</p>
-                    </div>
-                  </div>
-                </Panel>
-              </button>
-            </Reveal>
-          ))}
-        </div>
       )}
 
-      <Sheet open={!!active} onOpenChange={(o) => !o && setActive(null)}>
-        <SheetContent className="glass w-full overflow-y-auto sm:max-w-xl">
-          {active && (
-            <>
-              <SheetHeader className="border-b border-border/60">
-                <div className="flex items-center gap-3">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-base font-bold text-primary">
-                    {active.name.slice(0, 2).toUpperCase()}
-                  </span>
-                  <div className="space-y-1">
-                    <SheetTitle className="text-lg">{active.name}</SheetTitle>
-                    <div className="flex items-center gap-2">
-                      <StatusChip status={active.status} />
-                      <span className="text-xs text-muted-foreground">
-                        Client since {active.registeredSince}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </SheetHeader>
-
-              <div className="px-4 pb-8">
-                <Tabs defaultValue="overview">
-                  <TabsList className="w-full">
-                    <TabsTrigger value="overview">Overview</TabsTrigger>
-                    <TabsTrigger value="commercial">Commercial</TabsTrigger>
-                    <TabsTrigger value="documents">Documents</TabsTrigger>
-                    <TabsTrigger value="activity">Activity</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="overview" className="mt-5 space-y-5">
-                    <div className="surface p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Primary contact
-                      </p>
-                      <p className="mt-2 text-sm font-semibold">{active.contactPerson}</p>
-                      <p className="text-xs text-muted-foreground">{active.designation}</p>
-                      <div className="mt-3 space-y-1.5 text-xs">
-                        <p className="flex items-center gap-2">
-                          <Mail className="size-3.5 text-muted-foreground" /> {active.email}
-                        </p>
-                        <p className="flex items-center gap-2">
-                          <Phone className="size-3.5 text-muted-foreground" /> {active.phone}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="surface p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Registered address
-                      </p>
-                      <p className="mt-2 flex items-start gap-2 text-sm">
-                        <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                        {active.address}
-                      </p>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="commercial" className="mt-5 space-y-5">
-                    <div className="grid grid-cols-2 gap-3">
-                      {[
-                        { l: "Payment terms", v: active.paymentTerms },
-                        { l: "Currency", v: active.currency },
-                        { l: "Credit limit", v: active.creditLimit },
-                        { l: "Segment", v: active.segment },
-                      ].map((f) => (
-                        <div key={f.l} className="surface p-4">
-                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                            {f.l}
-                          </p>
-                          <p className="mt-1 text-sm font-semibold">{f.v}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="surface p-4">
-                      <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        <Building2 className="size-3.5" /> Bank details
-                      </p>
-                      <dl className="space-y-2 text-xs">
-                        {[
-                          ["Bank", active.bank.name],
-                          ["Account / IBAN", active.bank.account],
-                          ["SWIFT", active.bank.swift],
-                          ["Branch", active.bank.branch],
-                        ].map(([l, v]) => (
-                          <div key={l} className="flex justify-between gap-4">
-                            <dt className="text-muted-foreground">{l}</dt>
-                            <dd className="text-right font-medium">{v}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="documents" className="mt-5">
-                    {active.documents.length === 0 ? (
-                      <EmptyState
-                        icon={<FileText className="size-5" />}
-                        title="No documents uploaded"
-                        description="Regulatory and legal dossiers for this client have not been attached yet."
-                        action={
-                          <Button size="sm" variant="outline" onClick={() => toast("Upload dialog opened")}>
-                            Upload document
-                          </Button>
-                        }
-                      />
+      {/* ── Clients Content Container ── */}
+      {!isError && (
+        <div className="surface rounded-xl border border-border/60 overflow-hidden">
+          {/* Card Grid (Mobile or Card View) */}
+          <div
+            className={`grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3 ${viewMode === "list" ? "md:hidden" : ""}`}
+          >
+            {isLoading ? (
+              <ClientCardGridLoader cards={pageSize || 6} />
+            ) : filtered.length === 0 ? (
+              <div className="col-span-full py-4">
+                <EmptyState
+                  icon={<User className="size-6 text-muted-foreground" />}
+                  title="No clients found"
+                  description={
+                    clients.length === 0
+                      ? "No clients yet. Add your first client to get started."
+                      : "No clients match your search and filter criteria."
+                  }
+                  action={
+                    hasActiveFilters ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleResetFilters}
+                        className="gap-2"
+                      >
+                        <RotateCcw className="size-3.5" />
+                        Reset filters
+                      </Button>
                     ) : (
-                      <ul className="space-y-2.5">
-                        {active.documents.map((d) => (
-                          <motion.li
-                            key={d.name}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="surface flex items-center gap-3 p-3.5"
-                          >
-                            <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                              <FileText className="size-4" />
+                      <Button size="sm" onClick={openCreate} className="gap-2">
+                        <Plus className="size-4" /> Add client
+                      </Button>
+                    )
+                  }
+                  className="border-none py-8 shadow-none"
+                />
+              </div>
+            ) : (
+              filtered.map((c, i) => {
+                const poc = firstPoc(c);
+                const addr = firstAddr(c);
+                return (
+                  <Reveal key={c.id} delay={i * 0.05}>
+                    <div className="h-full">
+                      <Panel hover className="h-full">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                              {c.companyName.slice(0, 2).toUpperCase()}
                             </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium">{d.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {d.type} · {d.size} · {d.date}
+                            <div className="min-w-0">
+                              <p className="break-words font-semibold leading-tight">
+                                {c.companyName}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {c.customerCode} · {CUSTOMER_TYPE_LABELS[c.customerType]}
                               </p>
                             </div>
+                          </div>
+                          <TierBadge level={c.clientLevel} />
+                        </div>
+
+                        <dl className="mt-5 space-y-2 text-xs text-muted-foreground">
+                          {addr && (
+                            <div className="flex items-center gap-2">
+                              <Globe2 className="size-3.5" /> {addr.city}, {addr.country}
+                            </div>
+                          )}
+                          {poc && (
+                            <div className="flex items-center gap-2">
+                              <Mail className="size-3.5" /> {poc.email}
+                            </div>
+                          )}
+                        </dl>
+
+                        <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                              Annual Turnover
+                            </p>
+                            <p className="text-sm font-semibold tabular-nums">
+                              {c.annualTurnover ? formatINR(c.annualTurnover) : "—"}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                              Documents
+                            </p>
+                            <p className="text-sm font-semibold">{c.documents?.length ?? 0}</p>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex min-w-0 flex-col gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full shrink-0 justify-center"
+                            onClick={() =>
+                              navigate({ to: "/clients/$clientId", params: { clientId: c.id } })
+                            }
+                          >
+                            <Eye className="size-4" /> View
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full shrink-0 justify-center"
+                            onClick={() =>
+                              navigate({
+                                to: "/clients/$clientId/edit",
+                                params: { clientId: c.id },
+                              })
+                            }
+                          >
+                            <Pencil className="size-4" /> Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full shrink-0 justify-center text-destructive"
+                            onClick={() => setDeleteConfirm(c)}
+                          >
+                            <Trash2 className="size-4" /> Delete client
+                          </Button>
+                        </div>
+                      </Panel>
+                    </div>
+                  </Reveal>
+                );
+              })
+            )}
+          </div>
+
+          {/* Table List (Desktop List View) */}
+          <div
+            className={`hidden overflow-x-auto overflow-y-hidden ${viewMode === "list" ? "md:block" : ""}`}
+          >
+            <table className="min-w-[900px] w-full text-left text-sm">
+              <thead className="border-b border-border/60 bg-muted/40 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">Contact</th>
+                  <th className="px-4 py-3">Location</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Turnover</th>
+                  <th className="px-4 py-3">Tier</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {isLoading ? (
+                  <TableRowLoader colSpan={7} rows={pageSize || 6} />
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-8">
+                      <EmptyState
+                        icon={<User className="size-6 text-muted-foreground" />}
+                        title="No clients found"
+                        description={
+                          clients.length === 0
+                            ? "No clients yet. Add your first client to get started."
+                            : "No clients match your search and filter criteria."
+                        }
+                        action={
+                          hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleResetFilters}
+                              className="gap-2"
+                            >
+                              <RotateCcw className="size-3.5" />
+                              Reset filters
+                            </Button>
+                          ) : (
+                            <Button size="sm" onClick={openCreate} className="gap-2">
+                              <Plus className="size-4" /> Add client
+                            </Button>
+                          )
+                        }
+                        className="border-none py-8 shadow-none"
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((client, i) => {
+                    const poc = firstPoc(client);
+                    const address = firstAddr(client);
+                    return (
+                      <motion.tr
+                        key={client.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: i * 0.02, duration: 0.25 }}
+                        className="hover:bg-muted/30 transition-colors duration-150"
+                      >
+                        <td className="px-4 py-3">
+                          <p className="font-semibold">{client.companyName}</p>
+                          <p className="text-xs text-muted-foreground">{client.customerCode}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p>{poc?.personName || "—"}</p>
+                          <p className="text-xs text-muted-foreground">{poc?.email || "—"}</p>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {address?.city || address?.country
+                            ? [address.city, address.country].filter(Boolean).join(", ")
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="outline">
+                            {CUSTOMER_TYPE_LABELS[client.customerType]}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 font-medium">
+                          {client.annualTurnover ? formatINR(client.annualTurnover) : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <TierBadge level={client.clientLevel} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1">
                             <Button
                               variant="ghost"
                               size="icon"
-                              aria-label="Download"
-                              onClick={() => toast.success(`${d.name} downloaded`)}
+                              className="size-8 text-muted-foreground hover:text-foreground"
+                              onClick={() =>
+                                navigate({
+                                  to: "/clients/$clientId",
+                                  params: { clientId: client.id },
+                                })
+                              }
                             >
-                              <Download className="size-4" />
+                              <Eye className="size-4" />
                             </Button>
-                          </motion.li>
-                        ))}
-                      </ul>
-                    )}
-                  </TabsContent>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-muted-foreground hover:text-foreground"
+                              onClick={() =>
+                                navigate({
+                                  to: "/clients/$clientId/edit",
+                                  params: { clientId: client.id },
+                                })
+                              }
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeleteConfirm(client)}
+                              title="Delete client"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
-                  <TabsContent value="activity" className="mt-5">
-                    <Timeline items={active.timeline} />
-                  </TabsContent>
-                </Tabs>
-              </div>
-            </>
+          {/* ── Pagination Bar ── */}
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            totalElements={totalElements}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={(newSize) => {
+              setPageSize(newSize);
+              setPage(0);
+            }}
+          />
+        </div>
+      )}
+
+      {/* â”€â”€ Detail Drawer â”€â”€ */}
+      <Sheet open={!!active} onOpenChange={(o) => !o && setActiveId(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-xl bg-background border-l border-border">
+          {active && (
+            <ClientDetailDrawer
+              client={active}
+              onEdit={openEdit}
+              onResendEmail={(id) => emailMutation.mutate(id)}
+              onDelete={setDeleteConfirm}
+            />
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="size-5" /> Delete Client
+            </DialogTitle>
+            <DialogDescription>
+              Permanently delete <strong className="text-foreground">{deleteConfirm?.companyName}</strong>
+              ? Its attached documents will also be removed. Clients with existing RFQs cannot be
+              deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-3 pt-2 sm:gap-3">
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => deleteConfirm && deleteMutation.mutate(deleteConfirm.id)}
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Delete Client"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Detail Drawer ───────────────────────────────────────────────────────────
+
+function ClientDetailDrawer({
+  client,
+  onEdit,
+  onResendEmail,
+  onDelete,
+}: {
+  client: Client;
+  onEdit: (c: Client) => void;
+  onResendEmail: (id: string) => void;
+  onDelete: (client: Client) => void;
+}) {
+  const poc = client.pointOfContacts ?? [];
+  const addresses = client.addresses ?? [];
+  const documents = client.documents ?? [];
+
+  return (
+    <>
+      <SheetHeader className="border-b border-border/60 pb-3">
+        <div className="flex items-start justify-between gap-3 pt-6">
+          <div className="flex items-center gap-3">
+            <span className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-base font-bold text-primary">
+              {client.companyName.slice(0, 2).toUpperCase()}
+            </span>
+            <div className="space-y-1">
+              <SheetTitle className="text-lg">{client.companyName}</SheetTitle>
+              <div className="flex items-center gap-2">
+                <TierBadge level={client.clientLevel} />
+                <span className="text-xs text-muted-foreground">{client.customerCode}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-1.5 pt-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={() => onResendEmail(client.id)}
+              title="Resend registration email"
+            >
+              <Send className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={() => onEdit(client)}
+              title="Edit client"
+            >
+              <Pencil className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => onDelete(client)}
+              title="Delete client"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </SheetHeader>
+
+      <div className="px-4 pb-8 pt-4">
+        <Tabs defaultValue="overview">
+          <TabsList className="w-full">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="commercial">Commercial</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
+          </TabsList>
+
+          {/* ── Overview ── */}
+          <TabsContent value="overview" className="mt-5 space-y-5">
+            <div className="surface p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Company details
+              </p>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Customer Type</dt>
+                  <dd className="font-medium">{CUSTOMER_TYPE_LABELS[client.customerType]}</dd>
+                </div>
+                {client.tradeName && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Trade Name</dt>
+                    <dd className="font-medium">{client.tradeName}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Annual Turnover</dt>
+                  <dd className="font-medium">
+                    {client.annualTurnover ? formatINR(client.annualTurnover) : "—"}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Client Level</dt>
+                  <dd>
+                    <TierBadge level={client.clientLevel} />
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            {addresses.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Addresses
+                </p>
+                {addresses.map((a, i) => (
+                  <div key={a.id ?? i} className="surface p-4">
+                    <StatusChip status={ADDRESS_TYPE_LABELS[a.type]} />
+                    <p className="mt-2 flex items-start gap-2 text-sm">
+                      <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      {[a.line1, a.line2, a.city, a.state, a.pinCode, a.country]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {poc.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Points of Contact
+                </p>
+                {poc.map((p, i) => (
+                  <div key={p.id ?? i} className="surface p-4">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold">{p.personName}</p>
+                      {p.primary && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                          Primary
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {p.designation} · {p.department}
+                    </p>
+                    <div className="mt-2 space-y-1 text-xs">
+                      <p className="flex items-center gap-2">
+                        <Mail className="size-3.5 text-muted-foreground" /> {p.email}
+                      </p>
+                      <p className="flex items-center gap-2">
+                        <Phone className="size-3.5 text-muted-foreground" /> {p.phone}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Commercial ── */}
+          <TabsContent value="commercial" className="mt-5 space-y-5">
+            {client.paymentTerms && (
+              <div className="surface p-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Payment Terms
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { l: "Advance %", v: client.paymentTerms.advancePercent },
+                    { l: "Before Dispatch %", v: client.paymentTerms.beforeDispatchPercent },
+                    { l: "After Dispatch Days", v: client.paymentTerms.afterDispatchDays },
+                    { l: "After Dispatch %", v: client.paymentTerms.afterDispatchPercent },
+                  ].map((f) => (
+                    <div key={f.l}>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {f.l}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold">{f.v ?? "—"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {client.bankDetail && (
+              <div className="surface p-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Building2 className="size-3.5" /> Bank Details
+                </p>
+                <dl className="space-y-2 text-xs">
+                  {[
+                    ["Account Holder", client.bankDetail.accountHolderName],
+                    ["Account No.", client.bankDetail.accountNumber],
+                    ["Bank", client.bankDetail.bankName],
+                    ["Branch", client.bankDetail.branchName],
+                    ["IFSC", client.bankDetail.ifscCode],
+                    ["SWIFT", client.bankDetail.swiftCode],
+                  ]
+                    .filter(([, v]) => v)
+                    .map(([l, v]) => (
+                      <div key={l} className="flex justify-between gap-4">
+                        <dt className="text-muted-foreground">{l}</dt>
+                        <dd className="text-right font-medium">{v}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </div>
+            )}
+
+            <div className="surface p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Client Tier
+              </p>
+              <div className="flex items-center gap-3">
+                <TierBadge level={client.clientLevel} />
+                <span className="text-xs text-muted-foreground">
+                  Based on ₹{((client.annualTurnover ?? 0) / 10_000_000).toFixed(2)} Cr annual
+                  turnover
+                </span>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ── Documents ── */}
+          <TabsContent value="documents" className="mt-5">
+            <AdminDocumentsPanel client={client} />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </>
+  );
+}
+
+// ─── Address Block Component ─────────────────────────────────────────────────
+
+function AddressBlock({
+  title,
+  prefix,
+  form,
+  disabled,
+  sameAsLabel,
+  sameAsField,
+  onSameAsChange,
+  sameAsChecked,
+}: {
+  title: string;
+  prefix: "registeredAddress" | "billingAddress" | "shippingAddress";
+  form: ReturnType<typeof useForm<ClientFormValues>>;
+  disabled?: boolean;
+  sameAsLabel?: string;
+  sameAsField?: string;
+  onSameAsChange?: (checked: boolean) => void;
+  sameAsChecked?: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {sameAsLabel && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <Checkbox
+              checked={sameAsChecked}
+              onCheckedChange={(v) => onSameAsChange?.(v === true)}
+            />
+            {sameAsLabel}
+          </label>
+        )}
+      </div>
+      {!disabled && (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-2 lg:col-span-2">
+            <Label>Address Line 1</Label>
+            <Input {...form.register(`${prefix}.line1`)} placeholder="Street address" />
+          </div>
+          <div className="space-y-2">
+            <Label>Address Line 2</Label>
+            <Input {...form.register(`${prefix}.line2`)} placeholder="Apt, suite, etc." />
+          </div>
+          <div className="space-y-2">
+            <Label>City</Label>
+            <Input {...form.register(`${prefix}.city`)} placeholder="City" />
+          </div>
+          <div className="space-y-2">
+            <Label>State</Label>
+            <Input {...form.register(`${prefix}.state`)} placeholder="State" />
+          </div>
+          <div className="space-y-2">
+            <Label>Pin Code</Label>
+            <Input {...form.register(`${prefix}.pinCode`)} placeholder="Pin Code" />
+          </div>
+          <div className="space-y-2">
+            <Label>Country</Label>
+            <Input
+              {...form.register(`${prefix}.country`, {
+                onBlur: (event) => {
+                  const normalized = normalizeCountryName(event.target.value);
+                  if (normalized !== event.target.value) {
+                    form.setValue(`${prefix}.country`, normalized, { shouldDirty: true });
+                  }
+                },
+              })}
+              placeholder="Country"
+            />
+          </div>
+        </div>
+      )}
+      {disabled && (
+        <p className="text-sm italic text-muted-foreground border rounded-lg p-4 bg-muted/20">
+          Using {sameAsLabel?.toLowerCase().replace("same as ", "")} address
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function ClientFormView({
+  editingClient,
+  onClose,
+  isSubmitting,
+  onSubmit,
+}: {
+  editingClient: Client | null;
+  onClose: () => void;
+  isSubmitting: boolean;
+  onSubmit: (values: ClientFormValues, pendingDocuments: PendingClientDocument[]) => void;
+}) {
+  const isEdit = !!editingClient;
+  const [pendingDocuments, setPendingDocuments] = useState<PendingClientDocument[]>([]);
+
+  const form = useForm<ClientFormValues>({
+    defaultValues: editingClient ? clientToFormValues(editingClient) : defaultFormValues,
+  });
+
+  const billingSameAsRegistered = form.watch("billingSameAsRegistered");
+  const shippingSameAsBilling = form.watch("shippingSameAsBilling");
+
+  const {
+    fields: pocFields,
+    append: addPoc,
+    remove: removePoc,
+  } = useFieldArray({ control: form.control, name: "pointOfContacts" });
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="CLIENTS"
+        title={isEdit ? "Edit Client" : "Add New Client"}
+        description="Fill in the details below. Customer code will be auto-generated."
+        actions={
+          <Button variant="outline" onClick={onClose}>
+            <ChevronLeft className="size-4 mr-2" /> Back to clients
+          </Button>
+        }
+      />
+
+      <Panel className="overflow-hidden p-0">
+        <form
+          id="client-form"
+          onSubmit={form.handleSubmit((values) => onSubmit(values, pendingDocuments))}
+          className="flex flex-col"
+        >
+          <div className="p-6 sm:p-8">
+            <div className="space-y-8">
+              {/* Company Information */}
+              <section className="space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Company Information</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Enter the basic details about the client.
+                  </p>
+                </div>
+
+                {isEdit && (
+                  <div className="surface flex items-center gap-3 p-3 rounded-lg w-fit">
+                    <span className="text-xs font-medium text-muted-foreground">Customer Code</span>
+                    <span className="text-sm font-semibold">{editingClient?.customerCode}</span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                      Auto-generated
+                    </span>
+                  </div>
+                )}
+
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="customerType">
+                      Customer Type <span className="text-destructive">*</span>
+                    </Label>
+                    <Select
+                      value={form.watch("customerType")}
+                      onValueChange={(v) => form.setValue("customerType", v as CustomerType)}
+                    >
+                      <SelectTrigger id="customerType">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CUSTOMER_TYPES.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {CUSTOMER_TYPE_LABELS[t]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="companyName">
+                      Company Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="companyName"
+                      placeholder="e.g. Acme Global Industries"
+                      {...form.register("companyName", { required: true })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="tradeName">Trade Name</Label>
+                    <Input
+                      id="tradeName"
+                      placeholder="e.g. Acme Trading"
+                      {...form.register("tradeName")}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="annualTurnover">Annual Turnover (?)</Label>
+                    <Input
+                      id="annualTurnover"
+                      type="number"
+                      placeholder="e.g. 75000000"
+                      {...form.register("annualTurnover")}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <Separator className="my-6" />
+
+              {/* Addresses */}
+              <section className="space-y-6">
+                <div>
+                  <h2 className="text-lg font-semibold">Addresses</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Provide registered, billing, and shipping addresses.
+                  </p>
+                </div>
+
+                <div className="space-y-8">
+                  <AddressBlock title="Registered Address" prefix="registeredAddress" form={form} />
+
+                  <AddressBlock
+                    title="Billing Address"
+                    prefix="billingAddress"
+                    form={form}
+                    disabled={billingSameAsRegistered}
+                    sameAsLabel="Same as Registered"
+                    sameAsChecked={billingSameAsRegistered}
+                    onSameAsChange={(checked) => {
+                      form.setValue("billingSameAsRegistered", checked);
+                      if (checked) {
+                        const reg = form.getValues("registeredAddress");
+                        form.setValue("billingAddress", { ...reg });
+                        if (form.getValues("shippingSameAsBilling")) {
+                          form.setValue("shippingAddress", { ...reg });
+                        }
+                      }
+                    }}
+                  />
+
+                  <AddressBlock
+                    title="Shipping Address"
+                    prefix="shippingAddress"
+                    form={form}
+                    disabled={shippingSameAsBilling}
+                    sameAsLabel="Same as Billing"
+                    sameAsChecked={shippingSameAsBilling}
+                    onSameAsChange={(checked) => {
+                      form.setValue("shippingSameAsBilling", checked);
+                      if (checked) {
+                        const bill = form.getValues("billingSameAsRegistered")
+                          ? form.getValues("registeredAddress")
+                          : form.getValues("billingAddress");
+                        form.setValue("shippingAddress", { ...bill });
+                      }
+                    }}
+                  />
+                </div>
+              </section>
+
+              <Separator className="my-6" />
+
+              {/* Payment Terms */}
+              <section className="space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Agreed Payment Terms</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Configure default payment term values for this client.
+                  </p>
+                </div>
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                  <div className="space-y-2">
+                    <Label>Advance %</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 50"
+                      {...form.register("paymentTerms.advancePercent")}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Before Dispatch %</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 50"
+                      {...form.register("paymentTerms.beforeDispatchPercent")}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>After Dispatch Days</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 30"
+                      {...form.register("paymentTerms.afterDispatchDays")}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>After Dispatch %</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g. 0"
+                      {...form.register("paymentTerms.afterDispatchPercent")}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <Separator className="my-6" />
+
+              {/* Points of Contact */}
+              <section className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Points of Contact</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Add multiple contacts and designate a primary.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      addPoc({
+                        personName: "",
+                        designation: "",
+                        department: "",
+                        phone: "",
+                        email: "",
+                        primary: false,
+                      })
+                    }
+                  >
+                    <Plus className="size-3.5 mr-1.5" /> Add contact
+                  </Button>
+                </div>
+
+                {pocFields.length === 0 && (
+                  <EmptyState
+                    icon={<Users className="size-6 text-muted-foreground" />}
+                    title="No contacts added"
+                    description="Add at least one point of contact for this client."
+                  />
+                )}
+
+                <div className="space-y-4">
+                  {pocFields.map((field, idx) => (
+                    <div key={field.id} className="surface space-y-4 p-5 rounded-xl border">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <h3 className="text-sm font-semibold text-foreground">
+                            Contact {idx + 1}
+                          </h3>
+                          <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                            <Checkbox
+                              checked={form.watch(`pointOfContacts.${idx}.primary`)}
+                              onCheckedChange={(v) => {
+                                if (v === true) {
+                                  pocFields.forEach((_, i) =>
+                                    form.setValue(`pointOfContacts.${i}.primary`, false),
+                                  );
+                                }
+                                form.setValue(`pointOfContacts.${idx}.primary`, v === true);
+                              }}
+                            />
+                            <span
+                              className={cn(
+                                form.watch(`pointOfContacts.${idx}.primary`)
+                                  ? "text-primary font-medium"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              Primary
+                            </span>
+                          </label>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          onClick={() => removePoc(idx)}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label>
+                            Person Name <span className="text-destructive">*</span>
+                          </Label>
+                          <Input
+                            {...form.register(`pointOfContacts.${idx}.personName`, {
+                              required: true,
+                            })}
+                            placeholder="Full name"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Designation</Label>
+                          <Input
+                            {...form.register(`pointOfContacts.${idx}.designation`)}
+                            placeholder="e.g. Procurement Head"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Department</Label>
+                          <Input
+                            {...form.register(`pointOfContacts.${idx}.department`)}
+                            placeholder="e.g. Purchase"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Phone</Label>
+                          <Input
+                            {...form.register(`pointOfContacts.${idx}.phone`)}
+                            placeholder="+91-XXXXXXXXXX"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Email</Label>
+                          <Input
+                            type="email"
+                            {...form.register(`pointOfContacts.${idx}.email`)}
+                            placeholder="email@example.com"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <Separator className="my-6" />
+
+              <section className="space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Client Dossier &amp; Documents</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {isEdit
+                      ? "Upload, replace, and review the documents attached to this client."
+                      : "Add documents now. They will be uploaded as soon as the client is created."}
+                  </p>
+                </div>
+                {isEdit && editingClient ? (
+                  <AdminDocumentsPanel client={editingClient} />
+                ) : (
+                  <PendingDocumentsPanel
+                    documents={pendingDocuments}
+                    onChange={setPendingDocuments}
+                  />
+                )}
+              </section>
+
+              <Separator className="my-6" />
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div className="relative z-10 flex shrink-0 flex-col gap-3 border-t border-border/60 bg-card px-6 py-4 sm:flex-row sm:justify-end sm:px-8">
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
+              {isSubmitting && <Loader2 className="size-4 animate-spin mr-2" />}
+              {isEdit ? "Update Client" : "Create Client"}
+            </Button>
+          </div>
+        </form>
+      </Panel>
+    </div>
+  );
+}
+
+// ─── Add / Edit Form Dialog ──────────────────────────────────────────────────
+
+export function ClientFormDialog({
+  open,
+  onOpenChange,
+  editingClient,
+  isSubmitting,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editingClient: Client | null;
+  isSubmitting: boolean;
+  onSubmit: (values: ClientFormValues) => void;
+}) {
+  const isEdit = !!editingClient;
+
+  const form = useForm<ClientFormValues>({
+    defaultValues: editingClient ? clientToFormValues(editingClient) : defaultFormValues,
+  });
+
+  // Reset form when the dialog opens with a different client
+  useEffect(() => {
+    if (open) {
+      form.reset(editingClient ? clientToFormValues(editingClient) : defaultFormValues);
+    }
+  }, [open, editingClient?.id]);
+
+  const billingSameAsRegistered = form.watch("billingSameAsRegistered");
+  const shippingSameAsBilling = form.watch("shippingSameAsBilling");
+
+  const {
+    fields: pocFields,
+    append: addPoc,
+    remove: removePoc,
+  } = useFieldArray({ control: form.control, name: "pointOfContacts" });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-sm:fixed max-sm:inset-0 max-sm:w-full max-sm:h-full max-sm:max-w-none max-sm:rounded-none max-sm:border-0 sm:w-[92vw] sm:max-w-3xl lg:max-w-4xl sm:h-[88vh] sm:rounded-2xl flex flex-col p-0 overflow-hidden shadow-2xl">
+        {/* Fixed Header */}
+        <DialogHeader className="px-6 py-4 shrink-0 border-b border-border/40 bg-muted/20">
+          <DialogTitle className="text-lg font-semibold">
+            {isEdit ? "Edit Client" : "Add New Client"}
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            {isEdit
+              ? `Editing ${editingClient?.companyName} (${editingClient?.customerCode})`
+              : "Fill in the details below. Customer code will be auto-generated."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Scrollable Form Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+          <form id="client-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            {/* ── Company Info ── */}
+            <fieldset className="space-y-4">
+              <legend className="text-sm font-semibold">Company Information</legend>
+
+              {isEdit && (
+                <div className="surface flex items-center gap-3 p-3 rounded-lg">
+                  <span className="text-xs font-medium text-muted-foreground">Customer Code</span>
+                  <span className="text-sm font-semibold">{editingClient?.customerCode}</span>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    Auto-generated
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="customerType">Customer Type *</Label>
+                  <Select
+                    value={form.watch("customerType")}
+                    onValueChange={(v) => form.setValue("customerType", v as CustomerType)}
+                  >
+                    <SelectTrigger id="customerType">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CUSTOMER_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {CUSTOMER_TYPE_LABELS[t]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="annualTurnover">Annual Turnover (₹)</Label>
+                  <Input
+                    id="annualTurnover"
+                    type="number"
+                    placeholder="e.g. 75000000"
+                    {...form.register("annualTurnover")}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="companyName">Company Name *</Label>
+                  <Input
+                    id="companyName"
+                    placeholder="e.g. Acme Global Industries"
+                    {...form.register("companyName", { required: true })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tradeName">Trade Name</Label>
+                  <Input
+                    id="tradeName"
+                    placeholder="e.g. Acme Trading"
+                    {...form.register("tradeName")}
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <Separator />
+
+            {/* ── Addresses ── */}
+            <fieldset className="space-y-5">
+              <legend className="text-sm font-semibold">Addresses</legend>
+
+              <AddressBlock title="Registered Address" prefix="registeredAddress" form={form} />
+
+              <Separator className="my-2" />
+
+              <AddressBlock
+                title="Billing Address"
+                prefix="billingAddress"
+                form={form}
+                disabled={billingSameAsRegistered}
+                sameAsLabel="Same as Registered"
+                sameAsChecked={billingSameAsRegistered}
+                onSameAsChange={(checked) => {
+                  form.setValue("billingSameAsRegistered", checked);
+                  if (checked) {
+                    const reg = form.getValues("registeredAddress");
+                    form.setValue("billingAddress", { ...reg });
+                    if (form.getValues("shippingSameAsBilling")) {
+                      form.setValue("shippingAddress", { ...reg });
+                    }
+                  }
+                }}
+              />
+
+              <Separator className="my-2" />
+
+              <AddressBlock
+                title="Shipping Address"
+                prefix="shippingAddress"
+                form={form}
+                disabled={shippingSameAsBilling}
+                sameAsLabel="Same as Billing"
+                sameAsChecked={shippingSameAsBilling}
+                onSameAsChange={(checked) => {
+                  form.setValue("shippingSameAsBilling", checked);
+                  if (checked) {
+                    const bill = form.getValues("billingSameAsRegistered")
+                      ? form.getValues("registeredAddress")
+                      : form.getValues("billingAddress");
+                    form.setValue("shippingAddress", { ...bill });
+                  }
+                }}
+              />
+            </fieldset>
+
+            <Separator />
+
+            {/* ── Payment Terms ── */}
+            <fieldset className="space-y-4">
+              <legend className="text-sm font-semibold">Agreed Payment Terms</legend>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <Label>Advance %</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 50"
+                    {...form.register("paymentTerms.advancePercent")}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Before Dispatch %</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 50"
+                    {...form.register("paymentTerms.beforeDispatchPercent")}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>After Dispatch Days</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 30"
+                    {...form.register("paymentTerms.afterDispatchDays")}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>After Dispatch %</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 0"
+                    {...form.register("paymentTerms.afterDispatchPercent")}
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <Separator />
+
+            {/* ── Points of Contact ── */}
+            <fieldset className="space-y-4">
+              <div className="flex items-center justify-between">
+                <legend className="text-sm font-semibold">Points of Contact</legend>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    addPoc({
+                      personName: "",
+                      designation: "",
+                      department: "",
+                      phone: "",
+                      email: "",
+                      primary: false,
+                    })
+                  }
+                >
+                  <Plus className="size-3.5" /> Add
+                </Button>
+              </div>
+              {pocFields.length === 0 && (
+                <p className="text-xs text-muted-foreground">No contacts added yet.</p>
+              )}
+              {pocFields.map((field, idx) => (
+                <div key={field.id} className="surface space-y-3.5 p-4 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <p className="text-xs font-semibold text-muted-foreground">
+                        Contact {idx + 1}
+                      </p>
+                      <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                        <Checkbox
+                          checked={form.watch(`pointOfContacts.${idx}.primary`)}
+                          onCheckedChange={(v) => {
+                            if (v === true) {
+                              pocFields.forEach((_, i) =>
+                                form.setValue(`pointOfContacts.${i}.primary`, false),
+                              );
+                            }
+                            form.setValue(`pointOfContacts.${idx}.primary`, v === true);
+                          }}
+                        />
+                        <span
+                          className={cn(
+                            form.watch(`pointOfContacts.${idx}.primary`)
+                              ? "text-primary font-medium"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          Primary
+                        </span>
+                      </label>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => removePoc(idx)}
+                    >
+                      <Trash2 className="size-3.5 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Person Name *</Label>
+                      <Input
+                        {...form.register(`pointOfContacts.${idx}.personName`, { required: true })}
+                        placeholder="Full name"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Designation</Label>
+                      <Input
+                        {...form.register(`pointOfContacts.${idx}.designation`)}
+                        placeholder="e.g. Sales Ex."
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Department</Label>
+                    <Input
+                      {...form.register(`pointOfContacts.${idx}.department`)}
+                      placeholder="e.g. Sales, QA, QC, Admin"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Phone</Label>
+                      <Input
+                        {...form.register(`pointOfContacts.${idx}.phone`)}
+                        placeholder="+91-XXXXXXXXXX"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Email</Label>
+                      <Input
+                        type="email"
+                        {...form.register(`pointOfContacts.${idx}.email`)}
+                        placeholder="email@example.com"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </fieldset>
+          </form>
+        </div>
+
+        {/* Fixed Footer at bottom */}
+        <DialogFooter className="px-6 py-4 shrink-0 border-t border-border/40 bg-background flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form="client-form"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto"
+          >
+            {isSubmitting && <Loader2 className="size-4 animate-spin" />}
+            {isEdit ? "Update Client" : "Create Client"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Admin Documents Panel ───────────────────────────────────────────────────
+
+const DOC_LEFT: DocumentType[] = [
+  "DRUG_LICENSE",
+  "WHOLESALE_LICENSE",
+  "WHO_GMP_COPY",
+  "STATE_GMP_GLP_COPY",
+  "NEUTRAL_CODE_CERTIFICATE",
+  "LIST_OF_INTERNATIONAL_ACCREDITATION",
+  "MSME_CERTIFICATE",
+  "FIRM_REGISTRATION_CERTIFICATE",
+];
+
+const DOC_RIGHT: DocumentType[] = [
+  "BANK_CHQ_LEAF",
+  "IEC_CODE",
+  "GST_RC_COPY",
+  "PAN_CARD_COPY",
+  "ADDRESS_PROOF_DOCS_COPY",
+  "AADHAR_COPY",
+  "CIN_COPY",
+];
+
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes === 0) return "";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function PendingDocumentsPanel({
+  documents,
+  onChange,
+}: {
+  documents: PendingClientDocument[];
+  onChange: (documents: PendingClientDocument[]) => void;
+}) {
+  const [documentType, setDocumentType] = useState<DocumentType>(DOCUMENT_TYPES[0]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function addDocument(file: File) {
+    const existingIndex = documents.findIndex((document) => document.documentType === documentType);
+    const nextDocument = { documentType, file };
+    onChange(
+      existingIndex >= 0
+        ? documents.map((document, index) => (index === existingIndex ? nextDocument : document))
+        : [...documents, nextDocument],
+    );
+    inputRef.current && (inputRef.current.value = "");
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="space-y-2">
+          <Label htmlFor="new-client-document-type">Document type</Label>
+          <Select value={documentType} onValueChange={(value) => setDocumentType(value as DocumentType)}>
+            <SelectTrigger id="new-client-document-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DOCUMENT_TYPES.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {DOCUMENT_TYPE_LABELS[type]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) addDocument(file);
+          }}
+        />
+        <Button type="button" variant="outline" className="gap-2" onClick={() => inputRef.current?.click()}>
+          <Upload className="size-4" /> Add document
+        </Button>
+      </div>
+
+      {documents.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+          No documents selected yet.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {documents.map((document) => (
+            <div
+              key={document.documentType}
+              className="surface flex items-center justify-between gap-3 rounded-xl border p-3"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                  <FileText className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">
+                    {DOCUMENT_TYPE_LABELS[document.documentType]}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {document.file.name} • {formatBytes(document.file.size)}
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onChange(documents.filter((item) => item.documentType !== document.documentType))}
+                aria-label={`Remove ${DOCUMENT_TYPE_LABELS[document.documentType]}`}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminDocumentsPanel({ client }: { client: Client }) {
+  const queryClient = useQueryClient();
+  const [uploadingDoc, setUploadingDoc] = useState<DocumentType | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<ClientDocument | null>(null);
+
+  const docsMap = new Map<DocumentType, ClientDocument>();
+  (client.documents ?? []).forEach((d) => {
+    docsMap.set(d.documentType, d);
+  });
+
+  const uploadedCount = docsMap.size;
+  const totalCount = DOC_LEFT.length + DOC_RIGHT.length;
+
+  const deleteMutation = useMutation({
+    mutationFn: (docId: string) => deleteDocument(client.id, docId),
+    onSuccess: (updatedClient) => {
+      queryClient.setQueryData<Client[]>(["clients"], (old = []) =>
+        old.map((c) => (c.id === updatedClient.id ? updatedClient : c)),
+      );
+      queryClient.setQueryData<Client>(["clients", updatedClient.id], updatedClient);
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      toast.success("Document removed");
+    },
+    onError: (err: Error) => toast.error(`Failed to delete document: ${err.message}`),
+  });
+
+  async function handleUpload(docType: DocumentType, file: File) {
+    setUploadingDoc(docType);
+    try {
+      const updatedClient = await uploadDocument(client.id, file, docType);
+      queryClient.setQueryData<Client[]>(["clients"], (old = []) =>
+        old.map((c) => (c.id === updatedClient.id ? updatedClient : c)),
+      );
+      queryClient.setQueryData<Client>(["clients", updatedClient.id], updatedClient);
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      toast.success(`${DOCUMENT_TYPE_LABELS[docType]} uploaded successfully`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to upload document";
+      toast.error(`Failed to upload ${DOCUMENT_TYPE_LABELS[docType]}: ${msg}`);
+    } finally {
+      setUploadingDoc(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* ── Summary Card ── */}
+      <div className="surface p-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Document Dossier
+          </p>
+          <p className="text-sm font-medium mt-0.5">
+            {uploadedCount} of {totalCount} documents attached
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant={uploadedCount === totalCount ? "default" : "secondary"}>
+            {uploadedCount === totalCount
+              ? "Complete"
+              : `${Math.round((uploadedCount / totalCount) * 100)}% Complete`}
+          </Badge>
+        </div>
+      </div>
+
+      {/* ── Uploaded Documents List ── */}
+      {client.documents && client.documents.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Uploaded Files ({client.documents.length})
+          </p>
+          <div className="space-y-2">
+            {client.documents.map((doc) => {
+              const label = DOCUMENT_TYPE_LABELS[doc.documentType] || doc.documentType;
+              const filename = doc.originalFileName || doc.fileName || label;
+              const downloadUrl = getDocumentDownloadUrl(client.id, doc.id || "");
+
+              return (
+                <div
+                  key={doc.id || doc.documentType}
+                  className="surface flex items-center justify-between p-3 gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
+                      <FileText className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold truncate leading-tight">{label}</p>
+                        {doc.storageType && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground shrink-0">
+                            {doc.storageType}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {filename} {doc.fileSize ? `• ${formatBytes(doc.fileSize)}` : ""}{" "}
+                        {doc.uploadedAt ? `• ${new Date(doc.uploadedAt).toLocaleDateString()}` : ""}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs text-primary"
+                      onClick={() => setViewingDoc(doc)}
+                      title="View in document viewer"
+                    >
+                      <Eye className="size-3.5" />
+                      View
+                    </Button>
+
+                    <a href={downloadUrl} download={filename} title="Download original file">
+                      <Button variant="ghost" size="icon" className="size-8 text-muted-foreground">
+                        <Download className="size-3.5" />
+                      </Button>
+                    </a>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => doc.id && deleteMutation.mutate(doc.id)}
+                      title="Delete document"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Document Upload Matrix ── */}
+      <div className="space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Document Checklist & Uploads
+        </p>
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <div className="space-y-2">
+            {DOC_LEFT.map((dt) => (
+              <AdminDocRow
+                key={dt}
+                docType={dt}
+                doc={docsMap.get(dt)}
+                uploading={uploadingDoc === dt}
+                onUpload={(f) => handleUpload(dt, f)}
+                onView={(d) => setViewingDoc(d)}
+              />
+            ))}
+          </div>
+          <div className="space-y-2">
+            {DOC_RIGHT.map((dt) => (
+              <AdminDocRow
+                key={dt}
+                docType={dt}
+                doc={docsMap.get(dt)}
+                uploading={uploadingDoc === dt}
+                onUpload={(f) => handleUpload(dt, f)}
+                onView={(d) => setViewingDoc(d)}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── In-App Document Viewer Dialog ── */}
+      <DocumentViewerDialog
+        open={!!viewingDoc}
+        onOpenChange={(o) => !o && setViewingDoc(null)}
+        clientId={client.id}
+        document={viewingDoc}
+      />
+    </div>
+  );
+}
+
+function AdminDocRow({
+  docType,
+  doc,
+  uploading,
+  onUpload,
+  onView,
+}: {
+  docType: DocumentType;
+  doc?: ClientDocument;
+  uploading: boolean;
+  onUpload: (file: File) => void;
+  onView: (doc: ClientDocument) => void;
+}) {
+  const inputRef = { current: null as HTMLInputElement | null };
+  const uploaded = !!doc;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between rounded-lg border px-3 py-2 text-xs transition-colors gap-2",
+        uploaded ? "border-accent/30 bg-accent/5" : "border-border hover:bg-muted/40",
+      )}
+    >
+      <span className={cn("truncate font-medium flex-1", uploaded && "text-accent")}>
+        {DOCUMENT_TYPE_LABELS[docType]}
+      </span>
+      <input
+        ref={(el) => {
+          inputRef.current = el;
+        }}
+        type="file"
+        className="hidden"
+        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onUpload(file);
+            e.target.value = "";
+          }
+        }}
+      />
+      <div className="flex items-center gap-1 shrink-0">
+        {uploaded && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 text-[11px] px-2 text-accent hover:text-accent font-medium gap-1"
+            onClick={() => onView(doc)}
+          >
+            <Eye className="size-3" />
+            View
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant={uploaded ? "ghost" : "outline"}
+          size="sm"
+          className={cn("h-6 shrink-0 text-[11px] px-2", uploaded && "text-muted-foreground")}
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+          title={uploaded ? "Replace file" : "Upload file"}
+        >
+          {uploading ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />}
+          {uploaded ? "Replace" : "Upload"}
+        </Button>
+      </div>
     </div>
   );
 }

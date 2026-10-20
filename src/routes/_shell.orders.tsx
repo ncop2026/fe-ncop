@@ -1,23 +1,40 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Download, FileText, Package, Ship, Truck } from "lucide-react";
+import {
+  CircleDollarSign,
+  Download,
+  FileText,
+  ListChecks,
+  Package,
+  PackageCheck,
+  Ship,
+  Truck,
+} from "lucide-react";
 import { toast } from "sonner";
-import { EmptyState, PageHeader, Panel, StatusChip, Timeline } from "@/components/kit";
+import {
+  EmptyState,
+  MetricCard,
+  MetricGrid,
+  PageHeader,
+  Panel,
+  StatusChip,
+  Timeline,
+} from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { clients, orders, products } from "@/lib/mock-data";
+import { mockClients as clients, orders, products } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_shell/orders")({
   head: () => ({
     meta: [
-      { title: "Final Order · NCOP ERP" },
+      { title: "Final Order · Nourish Pharmaceutical ERP" },
       {
         name: "description",
         content:
           "Confirmed export order summary with products, shipping details, commercial totals, payment info and a live status tracker.",
       },
-      { property: "og:title", content: "Final Order · NCOP ERP" },
+      { property: "og:title", content: "Final Order · Nourish Pharmaceutical ERP" },
       {
         property: "og:description",
         content: "Export order summary and shipment status tracker for pharmaceutical trade.",
@@ -36,6 +53,7 @@ function FinalOrder() {
   const lines = products.slice(0, order.items);
   const stageIndex = stages.indexOf(order.status);
   const subtotal = order.value;
+  const portfolioValue = orders.reduce((total, item) => total + item.value, 0);
 
   return (
     <div className="space-y-6">
@@ -45,8 +63,12 @@ function FinalOrder() {
         description="Confirmed orders with commercial summary, shipping documents and live status tracking."
         actions={
           <>
-            <Button variant="outline" onClick={() => toast("Proforma invoice exported as PDF")}>
-              <Download className="size-4" /> Proforma
+            <Button
+              variant="outline"
+              onClick={() => toast("Proforma invoice exported as PDF")}
+              className="gap-2 font-medium"
+            >
+              <Download className="size-4 text-primary dark:text-accent" /> Proforma
             </Button>
             <Button onClick={() => toast.success("Packing list shared with logistics")}>
               <Ship className="size-4" /> Share with logistics
@@ -54,6 +76,38 @@ function FinalOrder() {
           </>
         }
       />
+
+      <MetricGrid columns={4} label="Order summary">
+        <MetricCard
+          icon={ListChecks}
+          label="Total orders"
+          value={orders.length}
+          detail="Confirmed commercial orders"
+          tone="primary"
+        />
+        <MetricCard
+          icon={Package}
+          label="In production"
+          value={orders.filter((item) => item.status === "In Production").length}
+          detail="Currently being manufactured"
+          tone="warning"
+        />
+        <MetricCard
+          icon={PackageCheck}
+          label="Shipped or delivered"
+          value={orders.filter((item) => ["Shipped", "Delivered"].includes(item.status)).length}
+          detail="Released to logistics"
+          tone="success"
+        />
+        <MetricCard
+          icon={CircleDollarSign}
+          label="Portfolio value"
+          value={portfolioValue}
+          prefix="$"
+          detail="Combined order value"
+          tone="violet"
+        />
+      </MetricGrid>
 
       <div className="flex flex-wrap gap-2">
         {orders.map((o) => (
@@ -140,7 +194,8 @@ function FinalOrder() {
                 </div>
                 <p className="text-xs text-muted-foreground">{(i + 2) * 250_000} units</p>
                 <p className="text-sm font-semibold tabular-nums">
-                  ${((i + 2) * 250_000 * p.price).toLocaleString("en-US", {
+                  $
+                  {((i + 2) * 250_000 * p.price).toLocaleString("en-US", {
                     maximumFractionDigits: 0,
                   })}
                 </p>
@@ -229,10 +284,26 @@ function FinalOrder() {
         <h3 className="mb-4 text-base font-semibold">Order activity</h3>
         <Timeline
           items={[
-            { date: order.eta, title: "Estimated delivery", detail: `${order.incoterm} · consignee warehouse` },
-            { date: "28 Jul 2026", title: "Batch documentation issued", detail: "CoA & CoO uploaded by QA" },
-            { date: "21 Jul 2026", title: "Production completed", detail: `${order.items} line items packed` },
-            { date: "12 Jul 2026", title: "Order confirmed", detail: `PO received from ${order.client}` },
+            {
+              date: order.eta,
+              title: "Estimated delivery",
+              detail: `${order.incoterm} · consignee warehouse`,
+            },
+            {
+              date: "28 Jul 2026",
+              title: "Batch documentation issued",
+              detail: "CoA & CoO uploaded by QA",
+            },
+            {
+              date: "21 Jul 2026",
+              title: "Production completed",
+              detail: `${order.items} line items packed`,
+            },
+            {
+              date: "12 Jul 2026",
+              title: "Order confirmed",
+              detail: `PO received from ${order.client}`,
+            },
           ]}
         />
       </Panel>
