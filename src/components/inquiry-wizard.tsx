@@ -307,16 +307,17 @@ export function InquiryWizard({ initialInquiry }: { initialInquiry?: CustomerInq
     (u) => u.effectiveActive && u.roleNames.some((r) => r.toUpperCase() === "SALES"),
   );
 
-  const submit = async (asDraft = false) => {
-    if (!asDraft && (!customerId || !contactPersonId || !allLinesComplete)) {
+  const submit = async (asDraft: boolean | unknown = false) => {
+    const isDraft = asDraft === true;
+    if (!isDraft && (!customerId || !contactPersonId || !allLinesComplete)) {
       toast.error("Select a customer and contact, then complete each product and quantity.");
       return;
     }
-    if (!asDraft && hasQa && !qaAssigneeId) {
+    if (!isDraft && hasQa && !qaAssigneeId) {
       toast.error("Please select a QA Reviewer for the in-house products.");
       return;
     }
-    if (!asDraft && hasQc && !qcAssigneeId) {
+    if (!isDraft && hasQc && !qcAssigneeId) {
       toast.error("Please select a QC Reviewer for the outsourced products.");
       return;
     }
@@ -341,10 +342,10 @@ export function InquiryWizard({ initialInquiry }: { initialInquiry?: CustomerInq
         ),
       };
       const inquiry = editingInquiry
-        ? asDraft
+        ? isDraft
           ? await updateInquiryDraft(editingInquiry.id, request)
           : await updateInquiry(editingInquiry.id, request)
-        : asDraft
+        : isDraft
           ? await createInquiryDraft(request)
           : await createInquiry(request);
       await queryClient.invalidateQueries({ queryKey: ["inquiries"] });
@@ -353,7 +354,7 @@ export function InquiryWizard({ initialInquiry }: { initialInquiry?: CustomerInq
         queryClient.invalidateQueries({ queryKey: ["qa-kpis"] }),
       ]);
       setPreviewingDraft(false);
-      if (asDraft) {
+      if (isDraft) {
         toast.success(`${inquiry.rfqNo} saved as a draft`);
         resetForm();
         setView("list");
@@ -427,7 +428,7 @@ export function InquiryWizard({ initialInquiry }: { initialInquiry?: CustomerInq
         editing={Boolean(editingInquiry)}
         submitting={submitting}
         onBack={() => setPreviewingDraft(false)}
-        onConfirm={submit}
+        onConfirm={() => submit(false)}
       />
     );
 
